@@ -1,5 +1,13 @@
 # Thermal Loop
-Notes
+Pressurized thermal loop at USC
+
+
+
+<p align="center">
+<img src="media/thermal_loop.png" alt="drawing" width="300"/>
+</p>
+<p align="center"> Pressurized thermal loop with key components annotated.
+</p>
 
 
 
