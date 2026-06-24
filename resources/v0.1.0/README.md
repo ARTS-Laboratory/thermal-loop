@@ -1,10 +1,5 @@
-# Resources
-
-## v0.1.0
+# v0.1.0
 * All files for the initial system
 * Covers work done in the summer of 2025-june 2026
 * Has a collectoin of CAD files, data, code, etc. 
 
-## v0.1.1
-* Cleaned up file sturcture starting July 2026
-* Maintains collectoin of CAD files, data, code, etc. 
