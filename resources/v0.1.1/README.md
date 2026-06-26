@@ -2,11 +2,11 @@
 
 ## CAD
 
-## data
+## Data
 
-## design Documents
+## Sesign Documents
 
-## Controller Code
+## Controller
 
-## simulations
+## Simulations
 
