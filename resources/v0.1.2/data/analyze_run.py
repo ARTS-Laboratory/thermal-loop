@@ -1,20 +1,19 @@
-
 # -*- coding: utf-8 -*-
 """
 SMR thermal loop run analyzer.
 
-This script lives in the "data" folder and looks inside "data/001"
-for LabVIEW run folders.
+This script lives in the "data" folder and looks inside the run-parent
+folder (currently "002") for LabVIEW run folders.
 
 Expected structure:
 
-data/
-    analyze_run.py
-    001/
-        run_YYYYMMDD_HHMMSS_tick/
-            temperature.csv
-            pressure.csv
-            flow.csv
+    .../resources/v0.1.2/data/
+        analyze_run.py
+        002/
+            run_YYYYMMDD_HHMMSS_tick/
+                temperature.csv
+                pressure.csv
+                flow.csv
 
 Default behavior:
     - Analyzes the latest run folder
@@ -24,72 +23,152 @@ Default behavior:
         3. flow_over_time
     - Excludes all average/summary columns
     - For flow, plots only the GPM flow column, not raw voltage
+
+Notes on speed:
+    - PNG only by default (PDF is vector and is very slow for large runs)
+    - Non-interactive Agg backend so no figure windows are created
+    - Points per line are capped, and the "tight bbox" second render pass
+      has been removed
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
+import time
 from pathlib import Path
 
 import pandas as pd
-import matplotlib.pyplot as plt
+
+import matplotlib
 
 
 # -------------------------------------------------------------------------
 # User-adjustable settings
 # -------------------------------------------------------------------------
 
-RUN_FOLDER_PARENT_NAME = "001"
+# Which folder inside "data" holds the run folders.
+# Set to None to always auto-detect the highest-numbered folder.
+RUN_FOLDER_PARENT_NAME = "002"
+
+# If the folder above is missing, fall back to the highest-numbered
+# folder that exists (001, 002, 003, ...). Makes future migrations painless.
+AUTO_DETECT_RUN_PARENT = True
 
 # Maximum number of points plotted per line.
 # This keeps graphs fast even for very large CSV files.
-MAX_PLOT_POINTS = 10000
+MAX_PLOT_POINTS = 3000
 
 # Save both PNG and PDF?
-SAVE_PDF = True
+# PDF is vector: every plotted point becomes path data in the file.
+# Leave this False unless you specifically need a vector figure.
+SAVE_PDF = False
 SAVE_PNG = True
+
+# Output resolution for PNG. 300 is print quality but ~4x the pixels of 150.
+PNG_DPI = 150
+
+# Use a non-interactive plotting backend (no figure windows, much faster
+# and avoids Spyder/Qt backend stalls). Set False if you want inline plots.
+USE_NON_INTERACTIVE_BACKEND = True
+
+
+if USE_NON_INTERACTIVE_BACKEND:
+    matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt  # noqa: E402  (must come after matplotlib.use)
+
+
+# Line-drawing speedups for dense data.
+matplotlib.rcParams["path.simplify"] = True
+matplotlib.rcParams["path.simplify_threshold"] = 1.0
+matplotlib.rcParams["agg.path.chunksize"] = 10000
 
 
 # -------------------------------------------------------------------------
 # Folder discovery
 # -------------------------------------------------------------------------
 
+def numbered_subfolders(folder: Path) -> list[Path]:
+    """Return subfolders whose names are all digits (001, 002, ...), sorted."""
+    if not folder.is_dir():
+        return []
+
+    return sorted(
+        (p for p in folder.iterdir() if p.is_dir() and p.name.isdigit()),
+        key=lambda p: p.name,
+    )
+
+
+def looks_like_data_dir(folder: Path) -> bool:
+    """True if this folder contains the run-parent folder."""
+    if not folder.is_dir():
+        return False
+
+    if RUN_FOLDER_PARENT_NAME and (folder / RUN_FOLDER_PARENT_NAME).is_dir():
+        return True
+
+    return AUTO_DETECT_RUN_PARENT and bool(numbered_subfolders(folder))
+
+
 def find_data_dir() -> Path:
     """
-    Find the data folder that contains the 001 run folder.
+    Find the data folder that contains the run-parent folder.
 
     Priority:
     1. Folder containing this script
     2. Current Spyder/terminal working directory
     """
-    candidates = [
-        Path(__file__).resolve().parent,
-        Path.cwd(),
-    ]
+    candidates: list[Path] = []
+
+    try:
+        candidates.append(Path(__file__).resolve().parent)
+    except NameError:
+        # __file__ is undefined when code is pasted straight into a console.
+        pass
+
+    candidates.append(Path.cwd().resolve())
 
     for candidate in candidates:
-        candidate = candidate.resolve()
-
         # Case: candidate is the data folder.
-        if (candidate / RUN_FOLDER_PARENT_NAME).exists():
+        if looks_like_data_dir(candidate):
             return candidate
 
-        # Case: candidate is the repo folder and contains data/001.
-        if (candidate / "data" / RUN_FOLDER_PARENT_NAME).exists():
+        # Case: candidate is the version folder and contains data/002.
+        if looks_like_data_dir(candidate / "data"):
             return candidate / "data"
 
-        # Case: candidate is already the 001 folder.
-        if candidate.name == RUN_FOLDER_PARENT_NAME:
+        # Case: candidate is already the 002 folder.
+        if candidate.name.isdigit() and looks_like_data_dir(candidate.parent):
             return candidate.parent
 
     raise FileNotFoundError(
-        "Could not find the data folder containing '001'. "
-        "Make sure analyze_run.py is saved in the GitHub data folder."
+        f"Could not find the data folder containing '{RUN_FOLDER_PARENT_NAME}'. "
+        "Make sure analyze_run.py is saved in the data folder "
+        "(.../resources/v0.1.2/data)."
+    )
+
+
+def find_run_parent(data_dir: Path) -> Path:
+    """Return the folder that holds the run_* folders (normally data/002)."""
+    if RUN_FOLDER_PARENT_NAME:
+        explicit = data_dir / RUN_FOLDER_PARENT_NAME
+        if explicit.is_dir():
+            return explicit
+
+    if AUTO_DETECT_RUN_PARENT:
+        numbered = numbered_subfolders(data_dir)
+        if numbered:
+            return numbered[-1]
+
+    raise FileNotFoundError(
+        f"No run-parent folder found inside {data_dir}. "
+        f"Expected a folder named '{RUN_FOLDER_PARENT_NAME}'."
     )
 
 
 DATA_DIR = find_data_dir()
-RUN_PARENT = DATA_DIR / RUN_FOLDER_PARENT_NAME
+RUN_PARENT = find_run_parent(DATA_DIR)
 
 
 FILE_CANDIDATES = {
@@ -113,7 +192,7 @@ FILE_CANDIDATES = {
 
 
 def find_run_folders() -> list[Path]:
-    """Return available run folders inside data/001."""
+    """Return available run folders inside the run parent."""
     if not RUN_PARENT.exists():
         raise FileNotFoundError(f"Run parent folder does not exist: {RUN_PARENT}")
 
@@ -125,7 +204,7 @@ def find_run_folders() -> list[Path]:
     if not run_folders:
         run_folders = [
             p for p in RUN_PARENT.iterdir()
-            if p.is_dir()
+            if p.is_dir() and p.name != "plots"
         ]
 
     return sorted(run_folders, key=lambda p: p.name)
@@ -201,8 +280,8 @@ def read_clean_csv(path: Path) -> pd.DataFrame:
 
     df = df.dropna(how="all")
 
-    for col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    # Convert everything at once instead of column-by-column assignment.
+    df = df.apply(pd.to_numeric, errors="coerce")
 
     time_col = get_time_column(df)
     df = df.dropna(subset=[time_col])
@@ -266,20 +345,29 @@ def plot_dataframe(
     output_stem: Path,
     columns_to_plot: list[str],
     time_units: str = "minutes",
+    max_points: int = MAX_PLOT_POINTS,
 ) -> None:
     """Plot selected columns against time and save the graph."""
     if not columns_to_plot:
         raise ValueError(f"No columns selected for plot: {title}")
 
-    df_plot = downsample_dataframe(df)
+    start = time.time()
+
+    df_plot = downsample_dataframe(df, max_points)
+
+    print(
+        f"  Rendering '{title}': "
+        f"{len(columns_to_plot)} lines x {len(df_plot)} points",
+        flush=True,
+    )
 
     time_col = get_time_column(df_plot)
 
     if time_units == "minutes":
-        time = df_plot[time_col] / 60.0
+        time_axis = df_plot[time_col] / 60.0
         x_label = "Time (minutes)"
     elif time_units == "seconds":
-        time = df_plot[time_col]
+        time_axis = df_plot[time_col]
         x_label = "Time (seconds)"
     else:
         raise ValueError(f"Unsupported time_units: {time_units}")
@@ -291,7 +379,7 @@ def plot_dataframe(
             continue
 
         ax.plot(
-            time,
+            time_axis,
             df_plot[col],
             label=col,
             linewidth=1.0,
@@ -309,19 +397,24 @@ def plot_dataframe(
         borderaxespad=0.0,
     )
 
-    fig.tight_layout()
+    # Reserve room for the legend directly instead of using
+    # bbox_inches="tight", which forces a second full render of the figure.
+    fig.subplots_adjust(left=0.08, right=0.78, top=0.93, bottom=0.09)
 
     if SAVE_PNG:
         png_path = output_stem.with_suffix(".png")
-        fig.savefig(png_path, dpi=300, bbox_inches="tight", facecolor="white")
-        print(f"Saved: {png_path}")
+        fig.savefig(png_path, dpi=PNG_DPI, facecolor="white")
+        print(f"  Saved: {png_path}", flush=True)
 
     if SAVE_PDF:
         pdf_path = output_stem.with_suffix(".pdf")
-        fig.savefig(pdf_path, dpi=300, bbox_inches="tight", facecolor="white")
-        print(f"Saved: {pdf_path}")
+        fig.savefig(pdf_path, facecolor="white")
+        print(f"  Saved: {pdf_path}", flush=True)
 
     plt.close(fig)
+
+    print(f"  Done in {time.time() - start:.1f} s", flush=True)
+    print(flush=True)
 
 
 def get_temperature_columns(df: pd.DataFrame) -> list[str]:
@@ -417,28 +510,42 @@ def get_flow_columns(df: pd.DataFrame) -> list[str]:
 # Main analysis
 # -------------------------------------------------------------------------
 
-def analyze_run(run_folder: Path, time_units: str = "minutes") -> None:
+def analyze_run(
+    run_folder: Path,
+    time_units: str = "minutes",
+    max_points: int = MAX_PLOT_POINTS,
+) -> None:
     """Load one run folder and generate temperature, pressure, and flow plots."""
-    print()
-    print(f"Using data folder:")
-    print(DATA_DIR)
-    print()
-    print(f"Analyzing run folder:")
-    print(run_folder)
-    print()
+    print(flush=True)
+    print("Using data folder:", flush=True)
+    print(DATA_DIR, flush=True)
+    print(flush=True)
+    print("Run parent folder:", flush=True)
+    print(RUN_PARENT, flush=True)
+    print(flush=True)
+    print("Analyzing run folder:", flush=True)
+    print(run_folder, flush=True)
+    print(flush=True)
 
     temperature_csv = find_csv_file(run_folder, "temperature")
     pressure_csv = find_csv_file(run_folder, "pressure")
     flow_csv = find_csv_file(run_folder, "flow")
 
-    print(f"Temperature CSV: {temperature_csv.name}")
-    print(f"Pressure CSV:    {pressure_csv.name}")
-    print(f"Flow CSV:        {flow_csv.name}")
-    print()
+    print(f"Temperature CSV: {temperature_csv.name}", flush=True)
+    print(f"Pressure CSV:    {pressure_csv.name}", flush=True)
+    print(f"Flow CSV:        {flow_csv.name}", flush=True)
+    print(flush=True)
 
     temperature_df = read_clean_csv(temperature_csv)
     pressure_df = read_clean_csv(pressure_csv)
     flow_df = read_clean_csv(flow_csv)
+
+    print(
+        f"Rows loaded -> temperature: {len(temperature_df)}, "
+        f"pressure: {len(pressure_df)}, flow: {len(flow_df)}",
+        flush=True,
+    )
+    print(flush=True)
 
     plots_dir = run_folder / "plots"
     plots_dir.mkdir(exist_ok=True)
@@ -447,17 +554,17 @@ def analyze_run(run_folder: Path, time_units: str = "minutes") -> None:
     pressure_columns = get_pressure_columns(pressure_df)
     flow_columns = get_flow_columns(flow_df)
 
-    print("Temperature columns plotted:")
-    print(temperature_columns)
-    print()
+    print("Temperature columns plotted:", flush=True)
+    print(temperature_columns, flush=True)
+    print(flush=True)
 
-    print("Pressure columns plotted:")
-    print(pressure_columns)
-    print()
+    print("Pressure columns plotted:", flush=True)
+    print(pressure_columns, flush=True)
+    print(flush=True)
 
-    print("Flow columns plotted:")
-    print(flow_columns)
-    print()
+    print("Flow columns plotted:", flush=True)
+    print(flow_columns, flush=True)
+    print(flush=True)
 
     plot_dataframe(
         temperature_df,
@@ -466,6 +573,7 @@ def analyze_run(run_folder: Path, time_units: str = "minutes") -> None:
         output_stem=plots_dir / "temperature_over_time",
         columns_to_plot=temperature_columns,
         time_units=time_units,
+        max_points=max_points,
     )
 
     plot_dataframe(
@@ -475,6 +583,7 @@ def analyze_run(run_folder: Path, time_units: str = "minutes") -> None:
         output_stem=plots_dir / "pressure_over_time",
         columns_to_plot=pressure_columns,
         time_units=time_units,
+        max_points=max_points,
     )
 
     plot_dataframe(
@@ -484,12 +593,12 @@ def analyze_run(run_folder: Path, time_units: str = "minutes") -> None:
         output_stem=plots_dir / "flow_over_time",
         columns_to_plot=flow_columns,
         time_units=time_units,
+        max_points=max_points,
     )
 
-    print()
-    print("Finished.")
-    print(f"Plots saved in:")
-    print(plots_dir)
+    print("Finished.", flush=True)
+    print("Plots saved in:", flush=True)
+    print(plots_dir, flush=True)
 
 
 def list_runs() -> None:
@@ -503,6 +612,22 @@ def list_runs() -> None:
     print(f"Available runs in {RUN_PARENT}:")
     for run in run_folders:
         print(f"  {run.name}")
+
+
+def get_script_arguments() -> list[str]:
+    """
+    Return command-line arguments, ignoring the ones Spyder/Jupyter inject.
+
+    When a script is run inside an IPython kernel, sys.argv can contain
+    things like ['-f', '/path/kernel-1234.json'], which argparse would
+    reject and then call sys.exit() on.
+    """
+    argv = sys.argv[1:]
+
+    if any(arg == "-f" or arg.endswith(".json") for arg in argv):
+        return []
+
+    return argv
 
 
 def main() -> None:
@@ -532,14 +657,28 @@ def main() -> None:
         help="Time axis units. Default: minutes.",
     )
 
-    args = parser.parse_args()
+    parser.add_argument(
+        "--max-points",
+        type=int,
+        default=MAX_PLOT_POINTS,
+        help=f"Max points drawn per line. Default: {MAX_PLOT_POINTS}.",
+    )
+
+    args, unknown = parser.parse_known_args(get_script_arguments())
+
+    if unknown:
+        print(f"Ignoring unrecognized arguments: {unknown}", flush=True)
 
     if args.list:
         list_runs()
         return
 
     run_folder = resolve_run_folder(args.run)
-    analyze_run(run_folder, time_units=args.time_units)
+    analyze_run(
+        run_folder,
+        time_units=args.time_units,
+        max_points=args.max_points,
+    )
 
 
 if __name__ == "__main__":
