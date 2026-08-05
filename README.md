@@ -28,7 +28,7 @@ This work is licensed under a
 Cite as:
 
 @Misc{ARTSLabControlOrientedResearch,
-  author = {{ARTS-L}ab},   
+  author = {{ARTS-L}ab},  
   note   = {Accessed: 20xx-xx-xx},   
   title  = {Control-Oriented Research Environment for Energy Systems},   
   year   = {20xx},   
