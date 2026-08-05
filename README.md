@@ -1,5 +1,7 @@
-# Thermal Loop
-Pressurized thermal loop at USC
+# CORE²S
+## Control-Oriented Research Environment for Energy Systems
+
+A physical and digital testbed for experimenting with thermal, fluid, and control behavior in energy systems. It supports model calibration, dynamic synchronization, and validation of control strategies using measured loop data and simulation.
 
 
 
@@ -25,17 +27,13 @@ This work is licensed under a
 
 Cite as:
 
-MLA ...
- 
-in bibtex
-
-@Misc{...,   
-  author       = {{ARTS-Lab}},   
-  howpublished = {GitHub},  
-  title        = {...},   
-  groups       = {{ARTS-L}ab},  
-  url          = {https://github.com/ARTS-Laboratory/...},  
-}
+@Misc{ARTSLabControlOrientedResearch,  
+  author = {{ARTS-L}ab},  
+  title  = {Control-Oriented Research Environment for Energy Systems},  
+  groups = {{ARTS-L}ab},  
+  note = {Accessed: 20xx-xx-xx},  
+  url    = {https://github.com/ARTS-Laboratory/core2s},  
+}  
 
 <p align="center">
 <img src="media/QR-code.png" alt="drawing" width="200"/>
