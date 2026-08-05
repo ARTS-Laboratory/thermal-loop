@@ -27,13 +27,14 @@ This work is licensed under a
 
 Cite as:
 
-@Misc{ARTSLabControlOrientedResearch,  
-  author = {{ARTS-L}ab},  
-  title  = {Control-Oriented Research Environment for Energy Systems},  
-  groups = {{ARTS-L}ab},  
-  note = {Accessed: 20xx-xx-xx},  
-  url    = {https://github.com/ARTS-Laboratory/core2s},  
-}  
+@Misc{ARTSLabControlOrientedResearch,
+  author = {{ARTS-L}ab},
+  note   = {Accessed: 20xx-xx-xx},
+  title  = {Control-Oriented Research Environment for Energy Systems},
+  year   = {20xx},
+  groups = {{ARTS-L}ab},
+  url    = {https://github.com/ARTS-Laboratory/core2s},
+}
 
 <p align="center">
 <img src="media/QR-code.png" alt="drawing" width="200"/>
