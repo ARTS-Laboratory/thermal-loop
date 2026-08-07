@@ -14,15 +14,25 @@ Expected structure:
                 temperature.csv
                 pressure.csv
                 flow.csv
+                voltage.csv          (optional - newer runs only)
 
 Default behavior:
     - Analyzes the latest run folder
-    - Creates 3 plots:
+    - Creates up to 5 plots:
         1. temperature_over_time
         2. pressure_over_time
-        3. flow_over_time
+        3. flow_over_time              (heat exchanger flow)
+        4. main_loop_flow_over_time    (if the column exists)
+        5. voltage_over_time           (if voltage.csv exists)
+       plus power_over_time if voltage.csv carries a watts column.
     - Excludes all average/summary columns
-    - For flow, plots only the GPM flow column, not raw voltage
+    - For flow, plots only the GPM flow columns, not raw voltage
+    - Main loop flow is plotted separately from heat exchanger flow
+      because the two differ by more than an order of magnitude
+      (roughly 60 GPM vs a few GPM), so sharing one axis would
+      flatten the heat exchanger trace into the baseline.
+    - voltage.csv is optional: runs recorded before it was added
+      still analyze normally, that plot is just skipped.
 
 Notes on speed:
     - PNG only by default (PDF is vector and is very slow for large runs)
@@ -188,7 +198,16 @@ FILE_CANDIDATES = {
         "Flow_Log.csv",
         "Flow.csv",
     ],
+    "voltage": [
+        "voltage.csv",
+        "Voltage_Log.csv",
+        "Voltage.csv",
+        "power.csv",
+    ],
 }
+
+# Kinds that older runs will not have. Missing these is not an error.
+OPTIONAL_FILE_KINDS = {"voltage"}
 
 
 def find_run_folders() -> list[Path]:
@@ -259,6 +278,19 @@ def find_csv_file(run_folder: Path, kind: str) -> Path:
     )
 
 
+def find_optional_csv_file(run_folder: Path, kind: str) -> Path | None:
+    """
+    Same as find_csv_file, but returns None instead of raising.
+
+    Used for files that only exist in newer runs, so that older run
+    folders still analyze without error.
+    """
+    try:
+        return find_csv_file(run_folder, kind)
+    except FileNotFoundError:
+        return None
+
+
 # -------------------------------------------------------------------------
 # Data handling
 # -------------------------------------------------------------------------
@@ -297,11 +329,33 @@ def is_average_or_summary_column(column_name: str) -> bool:
         "avg",
         "average",
         "overall",
-        "main loop",
+        # Narrowed from a bare "main loop" so that a real measured
+        # channel named "Main Loop Flow (GPM)" is not silently dropped.
+        # The averaged columns are still caught by "avg" above.
+        "main loop avg",
         "heat exchanger avg",
         "hx avg",
         "hxpressure",
         "hx pressure",
+    ]
+
+    return any(keyword in lower for keyword in keywords)
+
+
+def is_main_loop_column(column_name: str) -> bool:
+    """Return True if the column belongs to the main loop rather than the HX."""
+    return "main loop" in column_name.lower()
+
+
+def is_power_column(column_name: str) -> bool:
+    """Return True if the column is a power column in watts or kilowatts."""
+    lower = column_name.lower()
+
+    keywords = [
+        "(w)",
+        "(kw)",
+        "power",
+        "watt",
     ]
 
     return any(keyword in lower for keyword in keywords)
@@ -463,9 +517,10 @@ def get_pressure_columns(df: pd.DataFrame) -> list[str]:
 
 def get_flow_columns(df: pd.DataFrame) -> list[str]:
     """
-    Select only flow in GPM.
+    Select heat exchanger flow in GPM.
 
-    Excludes raw voltage and average/summary columns.
+    Excludes raw voltage, signal amplitude, average/summary columns,
+    and main loop flow (which is plotted separately because of scale).
     """
     time_col = get_time_column(df)
 
@@ -479,6 +534,9 @@ def get_flow_columns(df: pd.DataFrame) -> list[str]:
             continue
 
         if is_average_or_summary_column(col):
+            continue
+
+        if is_main_loop_column(col):
             continue
 
         lower = col.lower()
@@ -500,10 +558,112 @@ def get_flow_columns(df: pd.DataFrame) -> list[str]:
             if is_average_or_summary_column(col):
                 continue
 
+            if is_main_loop_column(col):
+                continue
+
             selected.append(col)
             break
 
     return selected
+
+
+def get_main_loop_flow_columns(df: pd.DataFrame) -> list[str]:
+    """
+    Select main loop flow in GPM.
+
+    Returns an empty list for older runs that predate this column.
+    """
+    time_col = get_time_column(df)
+
+    selected = []
+
+    for col in df.columns:
+        if col == time_col:
+            continue
+
+        if is_raw_voltage_column(col):
+            continue
+
+        if is_average_or_summary_column(col):
+            continue
+
+        if not is_main_loop_column(col):
+            continue
+
+        lower = col.lower()
+
+        if "gpm" in lower or "flow" in lower:
+            selected.append(col)
+
+    return selected
+
+
+def get_voltage_columns(df: pd.DataFrame) -> list[str]:
+    """
+    Select voltage columns from voltage.csv.
+
+    Note this deliberately does NOT use is_raw_voltage_column, which exists
+    to strip voltages out of the flow plot. Here the voltages are the point.
+    """
+    time_col = get_time_column(df)
+
+    selected = []
+
+    for col in df.columns:
+        if col == time_col:
+            continue
+
+        if is_power_column(col):
+            continue
+
+        lower = col.lower()
+
+        if "(v)" in lower or "volt" in lower:
+            selected.append(col)
+
+    return selected
+
+
+def get_power_columns(df: pd.DataFrame) -> list[str]:
+    """
+    Select power columns from voltage.csv.
+
+    Plotted on their own axis: watts and volts differ by roughly three
+    orders of magnitude, so sharing an axis would flatten the voltage trace.
+    """
+    time_col = get_time_column(df)
+
+    return [
+        col for col in df.columns
+        if col != time_col and is_power_column(col)
+    ]
+
+
+def print_variation_summary(df: pd.DataFrame, columns: list[str]) -> None:
+    """
+    Print min/max/mean/spread for each column.
+
+    Added for the rod voltage file specifically: the reason that file
+    exists is to quantify how much the supply drifts over a run, and
+    the numbers are easier to compare than eyeballing the plot.
+    """
+    for col in columns:
+        series = df[col].dropna()
+
+        if series.empty:
+            continue
+
+        low = series.min()
+        high = series.max()
+        mean = series.mean()
+        spread = high - low
+        percent = (spread / mean * 100.0) if mean else float("nan")
+
+        print(
+            f"  {col}: min {low:.4f}, max {high:.4f}, mean {mean:.4f}, "
+            f"spread {spread:.4f} ({percent:.1f}% of mean)",
+            flush=True,
+        )
 
 
 # -------------------------------------------------------------------------
@@ -515,7 +675,12 @@ def analyze_run(
     time_units: str = "minutes",
     max_points: int = MAX_PLOT_POINTS,
 ) -> None:
-    """Load one run folder and generate temperature, pressure, and flow plots."""
+    """
+    Load one run folder and generate its plots.
+
+    Always: temperature, pressure, heat exchanger flow.
+    When the columns/files exist: main loop flow, rod voltage, rod power.
+    """
     print(flush=True)
     print("Using data folder:", flush=True)
     print(DATA_DIR, flush=True)
@@ -530,19 +695,27 @@ def analyze_run(
     temperature_csv = find_csv_file(run_folder, "temperature")
     pressure_csv = find_csv_file(run_folder, "pressure")
     flow_csv = find_csv_file(run_folder, "flow")
+    voltage_csv = find_optional_csv_file(run_folder, "voltage")
 
     print(f"Temperature CSV: {temperature_csv.name}", flush=True)
     print(f"Pressure CSV:    {pressure_csv.name}", flush=True)
     print(f"Flow CSV:        {flow_csv.name}", flush=True)
+    print(
+        f"Voltage CSV:     "
+        f"{voltage_csv.name if voltage_csv else '(not present in this run)'}",
+        flush=True,
+    )
     print(flush=True)
 
     temperature_df = read_clean_csv(temperature_csv)
     pressure_df = read_clean_csv(pressure_csv)
     flow_df = read_clean_csv(flow_csv)
+    voltage_df = read_clean_csv(voltage_csv) if voltage_csv else None
 
     print(
         f"Rows loaded -> temperature: {len(temperature_df)}, "
-        f"pressure: {len(pressure_df)}, flow: {len(flow_df)}",
+        f"pressure: {len(pressure_df)}, flow: {len(flow_df)}"
+        + (f", voltage: {len(voltage_df)}" if voltage_df is not None else ""),
         flush=True,
     )
     print(flush=True)
@@ -553,6 +726,14 @@ def analyze_run(
     temperature_columns = get_temperature_columns(temperature_df)
     pressure_columns = get_pressure_columns(pressure_df)
     flow_columns = get_flow_columns(flow_df)
+    main_loop_flow_columns = get_main_loop_flow_columns(flow_df)
+
+    if voltage_df is not None:
+        voltage_columns = get_voltage_columns(voltage_df)
+        power_columns = get_power_columns(voltage_df)
+    else:
+        voltage_columns = []
+        power_columns = []
 
     print("Temperature columns plotted:", flush=True)
     print(temperature_columns, flush=True)
@@ -562,9 +743,22 @@ def analyze_run(
     print(pressure_columns, flush=True)
     print(flush=True)
 
-    print("Flow columns plotted:", flush=True)
+    print("Heat exchanger flow columns plotted:", flush=True)
     print(flow_columns, flush=True)
     print(flush=True)
+
+    print("Main loop flow columns plotted:", flush=True)
+    print(main_loop_flow_columns or "(none found in this run)", flush=True)
+    print(flush=True)
+
+    print("Voltage columns plotted:", flush=True)
+    print(voltage_columns or "(none found in this run)", flush=True)
+    print(flush=True)
+
+    if power_columns:
+        print("Power columns plotted:", flush=True)
+        print(power_columns, flush=True)
+        print(flush=True)
 
     plot_dataframe(
         temperature_df,
@@ -595,6 +789,53 @@ def analyze_run(
         time_units=time_units,
         max_points=max_points,
     )
+
+    if main_loop_flow_columns:
+        plot_dataframe(
+            flow_df,
+            title="Main Loop Flow Over Time",
+            y_label="Flow (GPM)",
+            output_stem=plots_dir / "main_loop_flow_over_time",
+            columns_to_plot=main_loop_flow_columns,
+            time_units=time_units,
+            max_points=max_points,
+        )
+    else:
+        print("Skipping main loop flow plot: no matching column.", flush=True)
+        print(flush=True)
+
+    if voltage_df is not None and voltage_columns:
+        plot_dataframe(
+            voltage_df,
+            title="Rod Voltage Over Time",
+            y_label="Voltage (V)",
+            output_stem=plots_dir / "voltage_over_time",
+            columns_to_plot=voltage_columns,
+            time_units=time_units,
+            max_points=max_points,
+        )
+
+        print("Rod voltage variation over this run:", flush=True)
+        print_variation_summary(voltage_df, voltage_columns)
+        print(flush=True)
+    else:
+        print("Skipping voltage plot: no voltage.csv in this run.", flush=True)
+        print(flush=True)
+
+    if voltage_df is not None and power_columns:
+        plot_dataframe(
+            voltage_df,
+            title="Rod Power Over Time",
+            y_label="Power (W)",
+            output_stem=plots_dir / "power_over_time",
+            columns_to_plot=power_columns,
+            time_units=time_units,
+            max_points=max_points,
+        )
+
+        print("Rod power variation over this run:", flush=True)
+        print_variation_summary(voltage_df, power_columns)
+        print(flush=True)
 
     print("Finished.", flush=True)
     print("Plots saved in:", flush=True)
