@@ -1,0 +1,106 @@
+{
+  "_README": "Field-by-field docs are in the header of finalize_plot.py.",
+  "output_name": "run_20260806_170404_535960677_temperature",
+  "title": "TITLE: what this run shows",
+  "subtitle": "Conditions: rod voltage, power, secondary flow",
+  "files": {
+    "temperature": {
+      "path": "temperature.csv",
+      "time_column": "Elapsed Time (s)"
+    },
+    "flow": {
+      "path": "flow.csv",
+      "time_column": "Elapsed Time (s)"
+    }
+  },
+  "time": {
+    "units": "min",
+    "zero_at": 0.0,
+    "xlim": null
+  },
+  "temperature": {
+    "band": [
+      "T1 (deg C)",
+      "T2 (deg C)",
+      "T3 (deg C)",
+      "T4 (deg C)",
+      "T5 (deg C)",
+      "T6 (deg C)"
+    ],
+    "band_label": "Primary loop (min-max)",
+    "lines": {
+      "T7 (deg C)": "T7 (deg C)",
+      "T8 (deg C)": "T8 (deg C)"
+    },
+    "ylim": null,
+    "label": "Temperature (\u00b0C)"
+  },
+  "flow": {
+    "column": "Heat Exchanger Flow (GPM)",
+    "label": "HX flow (GPM)",
+    "ylim": null
+  },
+  "power": [],
+  "events": [],
+  "spans": [],
+  "callouts": [],
+  "figure": {
+    "width_in": 13.0,
+    "height_in": 7.5,
+    "dpi": 200
+  },
+  "fonts": {
+    "title": 22,
+    "subtitle": 16,
+    "axis_label": 17,
+    "tick": 14,
+    "legend": 14,
+    "annotation": 13
+  },
+  "style": {
+    "palette": {
+      "band_fill": "#9FB6C9",
+      "band_line": "#1E3D4F",
+      "line_1": "#C8102E",
+      "line_2": "#2E7D8F",
+      "line_3": "#8A8B22",
+      "flow": "#2E7D8F",
+      "power": "#C8102E",
+      "span": "#E8E4D8",
+      "grid": "#D6D2C8",
+      "text": "#1B1B1B"
+    },
+    "event_kinds": {
+      "flow": {
+        "color": "#2E7D8F",
+        "dash": [
+          6,
+          4
+        ]
+      },
+      "power": {
+        "color": "#C8102E",
+        "dash": [
+          2,
+          3
+        ]
+      },
+      "valve": {
+        "color": "#8A8B22",
+        "dash": [
+          10,
+          4,
+          2,
+          4
+        ]
+      },
+      "other": {
+        "color": "#5A5A5A",
+        "dash": [
+          4,
+          4
+        ]
+      }
+    }
+  }
+}
